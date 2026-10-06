@@ -1,0 +1,21 @@
+.player { margin-top: 16px; }
+.transport { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.transport .play { width: 44px; font-size: 16px; }
+.clock { font-variant-numeric: tabular-nums; color: #b8bcc4; margin-left: 8px; }
+
+.tracks { position: relative; display: grid; gap: 6px; }
+.track-row { display: grid; grid-template-columns: 230px 1fr; align-items: center; gap: 12px; }
+.track-controls { display: grid; gap: 4px; }
+.track-name { text-transform: capitalize; font-weight: 600; font-size: 13px; }
+.track-buttons { display: flex; align-items: center; gap: 4px; }
+.track-buttons button { padding: 2px 8px; font-size: 12px; }
+.track-buttons button.on { background: #6b2b33; border-color: #a33; }
+.track-buttons button.on.solo { background: #6b5a1a; border-color: #c9a227; }
+.track-buttons input[type="range"] { width: 90px; }
+.track-wave { background: #1a1b20; border-radius: 4px; min-height: 64px; cursor: pointer; }
+.wave.dim { opacity: 0.3; }
+.wave-placeholder { height: 64px; display: flex; align-items: center; justify-content: center; color: #6b7079; font-size: 12px; }
+
+/* Spans the waveform column of every row; the line is positioned in % of duration. */
+.playhead-lane { position: absolute; top: 0; bottom: 0; left: calc(230px + 12px); right: 0; pointer-events: none; }
+.playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 4px #000; transform: translateX(-1px); }

@@ -1,0 +1,17 @@
+.app { max-width: 960px; margin: 0 auto; padding: 24px; text-align: left; }
+header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+h1 { font-size: 22px; margin: 0; }
+h2 { font-size: 18px; margin: 16px 0 8px; }
+.muted { color: #8a8f98; font-weight: normal; }
+button { background: #2a2d34; color: #eee; border: 1px solid #3a3e47; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary { background: #4f6cf7; border-color: #4f6cf7; margin-top: 12px; }
+audio { width: 100%; max-width: 560px; }
+.stems { list-style: none; padding: 0; display: grid; gap: 8px; margin-top: 16px; }
+.stems li { display: grid; grid-template-columns: 80px 1fr auto; align-items: center; gap: 12px; }
+.stem-name { text-transform: capitalize; }
+.progress { margin-top: 16px; display: grid; gap: 8px; max-width: 560px; }
+.progress progress { width: 100%; }
+.progress button { justify-self: start; }
+.error { background: #4a1d22; border: 1px solid #a33; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; white-space: pre-wrap; }
+.notice { background: #1d3a2a; border: 1px solid #2f7a4f; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; }
