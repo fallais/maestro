@@ -51,7 +51,7 @@ type Track struct {
 	Name     string  `json:"name"`
 	Duration float64 `json:"duration"`
 	MixURL   string  `json:"mixUrl"`
-	// Stems is set once separated (possibly from the cache).
+	// Stems is set once separated (possibly in an earlier session).
 	Stems []Stem `json:"stems"`
 	dir   string
 }
@@ -174,7 +174,9 @@ func (a *App) LoadTrack(path string) (*Track, error) {
 		MixURL:   mediaURL(id, "mix.wav"),
 		dir:      dir,
 	}
-	t.Stems = cachedStems(t)
+	t.Stems = cachedStems(t, stemModel)
+
+	log.Printf("loaded %q (%.1f s, id %s, stems cached: %t)", path, t.Duration, id, t.Stems != nil)
 
 	a.mu.Lock()
 	a.track, a.left, a.right = t, left, right
@@ -183,16 +185,17 @@ func (a *App) LoadTrack(path string) (*Track, error) {
 	return t, nil
 }
 
-// SeparateStems runs Demucs on the loaded track (or returns cached stems),
+// SeparateStems runs Demucs on the loaded track (or returns its cached stems),
 // emitting "separation:progress" events.
 func (a *App) SeparateStems() ([]Stem, error) {
+	sm := stemModel
 	a.mu.Lock()
 	t, left, right := a.track, a.left, a.right
 	switch {
 	case t == nil:
 		a.mu.Unlock()
 		return nil, errNoTrack
-	case len(t.Stems) > 0:
+	case t.Stems != nil:
 		a.mu.Unlock()
 		return t.Stems, nil
 	case a.running:
@@ -210,7 +213,7 @@ func (a *App) SeparateStems() ([]Stem, error) {
 	}()
 
 	// Go cannot recover from running out of memory, so refuse up front.
-	need := uint64(len(left))*4*(2+2*demucs.NumSources+1) + modelMemory
+	need := uint64(len(left))*4*uint64(2+2*len(sm.Sources)+1) + modelMemory
 	if avail, ok := availableMemory(); ok && need > avail {
 		return nil, fmt.Errorf("not enough memory: separating %.0f s of audio needs about %.1f GB, %.1f GB available. Close other apps or use a shorter file",
 			t.Duration, float64(need)/(1<<30), float64(avail)/(1<<30))
@@ -223,7 +226,7 @@ func (a *App) SeparateStems() ([]Stem, error) {
 	}
 
 	emit(SeparationProgress{Stage: "loading-model"})
-	model, err := a.loadModel()
+	model, err := a.loadModel(sm)
 	if err != nil {
 		return nil, err
 	}
@@ -241,12 +244,16 @@ func (a *App) SeparateStems() ([]Stem, error) {
 	}
 
 	emit(SeparationProgress{Stage: "writing", Segment: segments, Segments: segments})
+	outDir := filepath.Join(t.dir, "stems", sm.ID)
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return nil, err
+	}
 	var wg sync.WaitGroup
-	errs := make([]error, demucs.NumSources)
-	for s, name := range demucs.Sources {
+	errs := make([]error, len(sm.Sources))
+	for s, name := range sm.Sources {
 		wg.Go(func() {
 			// Write to a temp name so an interrupted run never looks cached.
-			final := filepath.Join(t.dir, "stems", name+".wav")
+			final := filepath.Join(outDir, name+".wav")
 			errs[s] = audio.WriteWAV16(final+".tmp", stems[s][0], stems[s][1], demucs.SampleRate)
 			if errs[s] == nil {
 				errs[s] = os.Rename(final+".tmp", final)
@@ -258,10 +265,11 @@ func (a *App) SeparateStems() ([]Stem, error) {
 		return nil, fmt.Errorf("writing stems: %w", err)
 	}
 
+	stemList := cachedStems(t, sm)
 	a.mu.Lock()
-	t.Stems = cachedStems(t)
+	t.Stems = stemList
 	a.mu.Unlock()
-	return t.Stems, nil
+	return stemList, nil
 }
 
 // CancelSeparation stops a running separation after the current segment.
@@ -281,11 +289,12 @@ func (a *App) ExportStem(name string) (string, error) {
 	if t == nil {
 		return "", errNoTrack
 	}
-	src := filepath.Join(t.dir, "stems", name+".wav")
-	if name == "mix" {
-		src = filepath.Join(t.dir, "mix.wav")
-	} else if !slices.Contains(demucs.Sources[:], name) {
-		return "", fmt.Errorf("unknown stem %q", name)
+	src := filepath.Join(t.dir, "mix.wav")
+	if name != "mix" {
+		if !slices.Contains(stemModel.Sources, name) {
+			return "", fmt.Errorf("unknown stem %q", name)
+		}
+		src = filepath.Join(t.dir, "stems", stemModel.ID, name+".wav")
 	}
 	dst, err := wruntime.SaveFileDialog(a.ctx, wruntime.SaveDialogOptions{
 		Title:           "Export " + name,
@@ -312,7 +321,7 @@ func (a *App) dialogDir() string {
 	return ""
 }
 
-func (a *App) loadModel() (*demucs.ONNXModel, error) {
+func (a *App) loadModel(sm SeparationModel) (*demucs.ONNXModel, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.model != nil {
@@ -325,7 +334,7 @@ func (a *App) loadModel() (*demucs.ONNXModel, error) {
 	if err := demucs.InitRuntime(lib); err != nil {
 		return nil, err
 	}
-	path, err := findModel("htdemucs")
+	path, err := findModel(sm.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -333,17 +342,22 @@ func (a *App) loadModel() (*demucs.ONNXModel, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !slices.Equal(m.Sources(), sm.Sources) {
+		m.Destroy()
+		return nil, fmt.Errorf("%s outputs %v, expected %v: re-export it with tools/export_htdemucs.py %s", path, m.Sources(), sm.Sources, sm.ID)
+	}
 	a.model = m
 	return m, nil
 }
 
-func cachedStems(t *Track) []Stem {
+// cachedStems returns the stems of model sm for t if all of them are on disk.
+func cachedStems(t *Track, sm SeparationModel) []Stem {
 	var stems []Stem
-	for _, name := range demucs.Sources {
-		if _, err := os.Stat(filepath.Join(t.dir, "stems", name+".wav")); err != nil {
+	for _, name := range sm.Sources {
+		if _, err := os.Stat(filepath.Join(t.dir, "stems", sm.ID, name+".wav")); err != nil {
 			return nil
 		}
-		stems = append(stems, Stem{Name: name, URL: mediaURL(t.ID, "stems/"+name+".wav")})
+		stems = append(stems, Stem{Name: name, URL: mediaURL(t.ID, "stems/"+sm.ID+"/"+name+".wav")})
 	}
 	return stems
 }
@@ -381,7 +395,7 @@ func copyFile(src, dst string) error {
 
 func mediaURL(id, file string) string { return "/media/" + id + "/" + file }
 
-var mediaPath = regexp.MustCompile(`^/media/([0-9a-f]{16})/(mix\.wav|stems/(drums|bass|other|vocals)\.wav)$`)
+var mediaPath = regexp.MustCompile(`^/media/([0-9a-f]{16})/(mix\.wav|stems/htdemucs_6s/(drums|bass|other|vocals|guitar|piano)\.wav)$`)
 
 // mediaHandler serves cached WAVs to the webview (with Range support for seeking).
 func mediaHandler() http.Handler {

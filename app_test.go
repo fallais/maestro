@@ -19,7 +19,7 @@ func newTestApp(t *testing.T) (*App, func() []SeparationProgress) {
 	if _, err := findORTLib(); err != nil {
 		t.Skip(err)
 	}
-	if _, err := findModel("htdemucs"); err != nil {
+	if _, err := findModel(stemModel.ID); err != nil {
 		t.Skip(err)
 	}
 	if _, err := os.Stat("tools/fixtures/clip.wav"); err != nil {
@@ -59,8 +59,8 @@ func TestLoadSeparateServeAndCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("separated in %.1fs", time.Since(start).Seconds())
-	if len(stems) != 4 {
-		t.Fatalf("got %d stems", len(stems))
+	if len(stems) != 6 || stems[4].Name != "guitar" || stems[5].Name != "piano" {
+		t.Fatalf("got stems %+v", stems)
 	}
 	var stages []string
 	for _, e := range events() {
@@ -85,7 +85,7 @@ func TestLoadSeparateServeAndCache(t *testing.T) {
 	if res.StatusCode != http.StatusPartialContent {
 		t.Errorf("range request: %s", res.Status)
 	}
-	for _, bad := range []string{"/media/../../etc/passwd", "/media/0123456789abcdef/stems/x.wav"} {
+	for _, bad := range []string{"/media/../../etc/passwd", "/media/0123456789abcdef/stems/htdemucs_6s/x.wav", "/media/0123456789abcdef/stems/htdemucs/drums.wav"} {
 		res, err := http.Get(srv.URL + bad)
 		if err != nil {
 			t.Fatal(err)
@@ -101,8 +101,8 @@ func TestLoadSeparateServeAndCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(again.Stems) != 4 {
-		t.Errorf("expected cached stems on reload, got %d", len(again.Stems))
+	if len(again.Stems) != 6 {
+		t.Errorf("expected cached stems on reload, got %v", again.Stems)
 	}
 }
 
@@ -128,7 +128,7 @@ func TestCancelSeparation(t *testing.T) {
 	if latency > time.Second {
 		t.Errorf("cancel took %v; the in-flight segment should be terminated", latency)
 	}
-	if stems := cachedStems(a.track); stems != nil {
+	if stems := cachedStems(a.track, stemModel); stems != nil {
 		t.Error("a cancelled run must not leave cached stems")
 	}
 }

@@ -1,17 +1,20 @@
-"""Export Meta's pretrained htdemucs to ONNX for onnxruntime-web.
+"""Export Meta's pretrained htdemucs (4 stems) or htdemucs_6s (+ guitar, piano) to ONNX.
 
 torch.onnx cannot trace HTDemucs's STFT/iSTFT (complex tensors), so the exported
 graph stops at the complex boundary:
 
     inputs   mix   [1, 2, 343980]         stereo segment, 44.1 kHz (track-normalized)
              spec  [1, 4, 2048, 336]      CAC spectrogram of `mix` (re/im per channel)
-    outputs  spec_out [1, 4, 4, 2048, 336]  per-stem CAC spectrogram (de-normalized)
-             wave_out [1, 4, 2, 343980]     per-stem time-branch waveform (de-normalized)
+    outputs  spec_out [1, S, 4, 2048, 336]  per-stem CAC spectrogram (de-normalized)
+             wave_out [1, S, 2, 343980]     per-stem time-branch waveform (de-normalized)
+
+S is the number of sources; their names are stored in the model metadata
+("sources", comma-separated, in output order).
 
 The app computes `spec` with an STFT, then each stem is iSTFT(spec_out) + wave_out.
 See internal/demucs/dsp.go for the matching Go implementation.
 
-Usage: python tools/export_htdemucs.py models/htdemucs.onnx
+Usage: python tools/export_htdemucs.py [htdemucs|htdemucs_6s] [out.onnx]
 """
 
 import sys
@@ -57,11 +60,12 @@ class SpectralBoundary(torch.nn.Module):
         return captured["spec"], wave
 
 
-def main(out_path):
-    bag = get_model("htdemucs")
+def main(name, out_path):
+    bag = get_model(name)
+    assert len(bag.models) == 1, "bags of several models (e.g. htdemucs_ft) are not supported"
     model = bag.models[0].eval()
     assert int(model.segment * model.samplerate) == SEGMENT
-    assert model.sources == ["drums", "bass", "other", "vocals"], model.sources
+    assert model.sources[:4] == ["drums", "bass", "other", "vocals"], model.sources
     assert model.cac and model.nfft == 4096 and model.hop_length == 1024
 
     # The fused MHA kernel (eval + no_grad) has no ONNX symbolic.
@@ -86,6 +90,7 @@ def main(out_path):
     # the WebGPU EP cannot run ScatterND, and folding makes them plain constants.
     slim = onnxslim.slim(onnx.load(out_path))
     shrink_broadcast_constants(slim)
+    onnx.helper.set_model_props(slim, {"sources": ",".join(model.sources), "demucs_model": name})
     onnx.save(slim, out_path)
     onnx.checker.check_model(out_path, full_check=True)
     print("ops:", sorted({n.op_type for n in onnx.load(out_path).graph.node}))
@@ -136,4 +141,5 @@ def _fresh(model):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "models/htdemucs.onnx")
+    name = sys.argv[1] if len(sys.argv) > 1 else "htdemucs"
+    main(name, sys.argv[2] if len(sys.argv) > 2 else f"models/{name}.onnx")

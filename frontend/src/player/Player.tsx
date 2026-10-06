@@ -6,24 +6,27 @@ import { computePeaks, MultitrackEngine } from "../audio/engine";
 import { log } from "../log";
 import "./Player.css";
 
-const STEM_ORDER = ["vocals", "drums", "bass", "other"];
+const STEM_ORDER = ["vocals", "guitar", "piano", "drums", "bass", "other"];
 const COLORS: Record<string, string> = {
   mix: "#8a8f98",
   vocals: "#e879a6",
   drums: "#f5a524",
   bass: "#4f9cf7",
   other: "#5fcf8a",
+  guitar: "#c084fc",
+  piano: "#22d3ee",
 };
 
 interface Props {
   track: main.Track;
+  stems: main.Stem[];
   /** Lets siblings (chord timeline, piano roll) follow the same clock. */
   onEngine?: (engine: MultitrackEngine | null) => void;
   onError: (msg: string) => void;
   onNotice: (msg: string) => void;
 }
 
-export default function Player({ track, onEngine, onError, onNotice }: Props) {
+export default function Player({ track, stems: unsorted, onEngine, onError, onNotice }: Props) {
   const engine = useMemo(() => new MultitrackEngine(), []);
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [buffers, setBuffers] = useState<Record<string, AudioBuffer>>({});
@@ -42,8 +45,8 @@ export default function Player({ track, onEngine, onError, onNotice }: Props) {
 
   // Load the mix, then stems as they become available. The mix is muted once stems exist.
   const stems = useMemo(
-    () => [...(track.stems ?? [])].sort((a, b) => STEM_ORDER.indexOf(a.name) - STEM_ORDER.indexOf(b.name)),
-    [track.stems],
+    () => [...unsorted].sort((a, b) => STEM_ORDER.indexOf(a.name) - STEM_ORDER.indexOf(b.name)),
+    [unsorted],
   );
   useEffect(() => {
     const wanted: [string, string][] = [["mix", track.mixUrl], ...stems.map((s) => [s.name, s.url] as [string, string])];

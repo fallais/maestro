@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
@@ -31,25 +32,40 @@ func InitRuntime(libPath string) error {
 // ONNXModel is a Model backed by an onnxruntime session with preallocated I/O.
 // Not safe for concurrent use.
 type ONNXModel struct {
+	sources                     []string
 	session                     *ort.AdvancedSession
 	runOpts                     *ort.RunOptions
 	mix, spec, specOut, waveOut *ort.Tensor[float32]
 }
 
-// LoadONNX creates a CPU session for the htdemucs graph. threads <= 0 uses all cores.
+// legacySources is the output order of exports made before sources were
+// recorded in the model metadata (always 4-stem htdemucs).
+var legacySources = []string{"drums", "bass", "other", "vocals"}
+
+// LoadONNX creates a CPU session for an htdemucs-family graph exported by
+// tools/export_htdemucs.py. threads <= 0 uses all cores.
 func LoadONNX(modelPath string, threads int) (*ONNXModel, error) {
-	m := &ONNXModel{}
-	var err error
+	m := &ONNXModel{sources: legacySources}
+	meta, err := ort.GetModelMetadata(modelPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", modelPath, err)
+	}
+	if v, ok, err := meta.LookupCustomMetadataMap("sources"); err == nil && ok {
+		m.sources = strings.Split(v, ",")
+	}
+	meta.Destroy()
+	n := int64(len(m.sources))
+
 	if m.mix, err = ort.NewEmptyTensor[float32](ort.NewShape(1, 2, Segment)); err != nil {
 		return nil, err
 	}
 	if m.spec, err = ort.NewEmptyTensor[float32](ort.NewShape(1, 4, Bins, Frames)); err != nil {
 		return nil, m.destroyWith(err)
 	}
-	if m.specOut, err = ort.NewEmptyTensor[float32](ort.NewShape(1, int64(NumSources), 4, Bins, Frames)); err != nil {
+	if m.specOut, err = ort.NewEmptyTensor[float32](ort.NewShape(1, n, 4, Bins, Frames)); err != nil {
 		return nil, m.destroyWith(err)
 	}
-	if m.waveOut, err = ort.NewEmptyTensor[float32](ort.NewShape(1, int64(NumSources), 2, Segment)); err != nil {
+	if m.waveOut, err = ort.NewEmptyTensor[float32](ort.NewShape(1, n, 2, Segment)); err != nil {
 		return nil, m.destroyWith(err)
 	}
 
@@ -83,6 +99,9 @@ func LoadONNX(modelPath string, threads int) (*ONNXModel, error) {
 	}
 	return m, nil
 }
+
+// Sources implements Model: stem names in output order.
+func (m *ONNXModel) Sources() []string { return m.sources }
 
 // Run implements Model. Cancelling ctx terminates the in-flight inference.
 func (m *ONNXModel) Run(ctx context.Context, mix, spec []float32) ([]float32, []float32, error) {

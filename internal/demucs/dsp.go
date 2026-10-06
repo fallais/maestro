@@ -19,17 +19,9 @@ const (
 	Frames     = 336  // ceil(Segment / Hop)
 	Overlap    = 0.25 // demucs apply_model default
 
-	MixSize     = 2 * Segment
-	SpecSize    = 4 * Bins * Frames // [2 ch * (re, im), Bins, Frames]
-	SpecOutSize = NumSources * SpecSize
-	WaveOutSize = NumSources * MixSize
+	MixSize  = 2 * Segment
+	SpecSize = 4 * Bins * Frames // [2 ch * (re, im), Bins, Frames]
 )
-
-// NumSources is the number of stems htdemucs outputs.
-const NumSources = 4
-
-// Sources in model output order.
-var Sources = [NumSources]string{"drums", "bass", "other", "vocals"}
 
 // HTDemucs._spec pads the segment so FRAMES*HOP samples are covered, then
 // torch.stft (center=True) reflect-pads NFFT/2 more per side and yields
@@ -112,11 +104,11 @@ func Spectrogram(mix, out []float32) {
 }
 
 // AddInverseSpectrogram turns the model outputs into stem waveforms in place:
-// wave += iSTFT(specOut). specOut is [Sources, 4, Bins, Frames], wave is
-// [Sources, 2, Segment]. Matches HTDemucs._mask + _ispec.
+// wave += iSTFT(specOut). specOut is [S, 4, Bins, Frames], wave is [S, 2, Segment]
+// for S sources. Matches HTDemucs._mask + _ispec.
 func AddInverseSpectrogram(specOut, wave []float32) {
 	var wg sync.WaitGroup
-	for sc := range NumSources * 2 {
+	for sc := range len(wave) / Segment { // one goroutine per (source, channel)
 		wg.Go(func() {
 			re := specOut[2*sc*plane : (2*sc+1)*plane]
 			im := specOut[(2*sc+1)*plane : (2*sc+2)*plane]

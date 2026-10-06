@@ -73,6 +73,7 @@ export default function App() {
   const onError = useCallback((msg: string) => setError(msg), []);
   const onNotice = useCallback((msg: string) => setNotice(msg), []);
   const pct = progress && progress.segments ? (100 * progress.segment) / progress.segments : 0;
+  const stems = track?.stems ?? [];
 
   return (
     <main className="app">
@@ -98,7 +99,7 @@ export default function App() {
         <section>
           <h2>{track.name}</h2>
 
-          {!track.stems?.length &&
+          {!stems.length &&
             (busy === "separating" ? (
               <div className="progress">
                 <div className="progress-label">
@@ -115,7 +116,8 @@ export default function App() {
               </button>
             ))}
 
-          <Player key={track.id} track={track} onEngine={setEngine} onError={onError} onNotice={onNotice} />
+          <Player key={track.id} track={track} stems={stems}
+            onEngine={setEngine} onError={onError} onNotice={onNotice} />
         </section>
       )}
     </main>

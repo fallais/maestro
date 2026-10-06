@@ -3,7 +3,8 @@
 Writes to OUT_DIR (default tools/fixtures/):
   clip.wav                  12 s synthetic song, 44.1 kHz stereo
   clip.f32                  same, raw float32 [2, N]
-  ref_stems.f32             apply_model(shifts=0, overlap=0.25) output [4, 2, N]
+  ref_stems.f32             htdemucs apply_model(shifts=0, overlap=0.25) output [4, 2, N]
+  ref_stems_htdemucs_6s.f32 same for htdemucs_6s [6, 2, N]
   seg_mix.f32 / seg_spec.f32 / seg_spec_out.f32 / seg_wave_out.f32 / seg_full.f32
                             one segment's model I/O, to test the JS STFT/iSTFT alone
 
@@ -92,15 +93,17 @@ def main(out_dir):
     mix.tofile(out / "clip.f32")
     print("clip", mix.shape)
 
-    model = get_model("htdemucs").models[0].eval()
     wav = torch.from_numpy(mix)
     ref = wav.mean(0)
     mean, std = ref.mean(), ref.std() + 1e-8
-    with torch.no_grad():
-        stems = apply_model(model, ((wav - mean) / std)[None], shifts=0, split=True, overlap=0.25)
-    stems = (stems * std + mean)[0].numpy().astype(np.float32)
-    stems.tofile(out / "ref_stems.f32")
-    print("ref_stems", stems.shape)
+    for name, file in [("htdemucs_6s", "ref_stems_htdemucs_6s.f32"), ("htdemucs", "ref_stems.f32")]:
+        model = get_model(name).models[0].eval()
+        with torch.no_grad():
+            stems = apply_model(model, ((wav - mean) / std)[None], shifts=0, split=True, overlap=0.25)
+        stems = (stems * std + mean)[0].numpy().astype(np.float32)
+        stems.tofile(out / file)
+        print(file, stems.shape, model.sources)
+    # `model` is htdemucs from here on.
 
     # One segment's intermediates (the first chunk, normalized like apply_model does).
     seg = ((wav - mean) / std)[:, :SEGMENT][None]

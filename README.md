@@ -1,8 +1,9 @@
 # Maestro
 
 Desktop music practice tool (Wails: Go backend + React frontend). Splits a song
-into drums / bass / other / vocals with Demucs (htdemucs), running natively via
-onnxruntime.
+into six stems (drums, bass, other, vocals, guitar, piano) with Demucs
+`htdemucs_6s`, running natively via onnxruntime. The Demucs authors note the
+piano stem is the least reliable.
 
 Status: separation pipeline done and verified; multitrack player, notes
 (basic-pitch) and chords are next.
@@ -25,24 +26,25 @@ Status: separation pipeline done and verified; multitrack player, notes
 
    Or point `MAESTRO_ORT_LIB` at an existing `libonnxruntime.so.1.29.1`.
 
-3. **The htdemucs ONNX model** — the one manual step. There is no official ONNX
+3. **The Demucs ONNX model** — the one manual step. There is no official ONNX
    release, so it is exported from Meta's pretrained checkpoint (MIT), once:
 
    ```sh
    uv venv ~/.cache/maestro/venv --python 3.12
    VIRTUAL_ENV=~/.cache/maestro/venv uv pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
    VIRTUAL_ENV=~/.cache/maestro/venv uv pip install demucs onnx onnxruntime onnxscript onnxslim soundfile numpy
-   ~/.cache/maestro/venv/bin/python tools/export_htdemucs.py models/htdemucs.onnx
+   ~/.cache/maestro/venv/bin/python tools/export_htdemucs.py htdemucs_6s   # → models/htdemucs_6s.onnx (111 MB)
    ```
 
-   The script checks the exported graph against the PyTorch forward pass.
+   The script checks the exported graph against the PyTorch forward pass and
+   records the stem names in the model metadata.
    STFT/iSTFT use complex tensors that ONNX cannot express, so the graph stops
    at the spectrogram and `internal/demucs/dsp.go` does the rest.
 
    Keep the venv outside the repo: torch has ~20k files and exhausts the file
    watchers of `wails dev`.
 
-   The app looks for the model in `$MAESTRO_MODEL`, `~/.local/share/maestro/models/`,
+   The app looks for `<model>.onnx` in `$MAESTRO_MODEL`, `~/.local/share/maestro/models/`,
    `<exe dir>/models/`, then `./models/`.
 
 ## Run
@@ -52,8 +54,12 @@ wails dev -tags webkit2_41
 wails build -tags webkit2_41   # → build/bin/maestro
 ```
 
+`maestro song.mp3` opens a file directly; `maestro --selftest song.mp3` plays
+it for a second, logs audio diagnostics and quits.
+
 Separated stems are cached per song (by content hash) in
-`~/.local/share/maestro/tracks/`, so each song is separated once.
+`~/.local/share/maestro/tracks/<id>/stems/htdemucs_6s/`, so each song is
+separated once.
 
 ## Tests
 
@@ -64,4 +70,5 @@ go test ./...
 
 `internal/demucs` checks the Go STFT/iSTFT and the full chunked separation
 against PyTorch `demucs.apply_model` on a synthetic 12 s clip (currently
-82–98 dB SNR on every stem, i.e. numerically identical).
+82–96 dB SNR on every stem, i.e. numerically identical). It also checks the
+4-stem `htdemucs` if you export it (`tools/export_htdemucs.py htdemucs`).
